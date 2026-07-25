@@ -1,0 +1,14 @@
+# Repo-root build context (infra/docker-compose.yml uses `context: ..` so
+# apps/api and apps/web Dockerfiles can `pip install -e ../../services/*`).
+# Without this file, every build sends the entire monorepo — including
+# apps/api/.venv and apps/web/node_modules (~700MB combined) — to the Docker
+# daemon on every invocation, which is what actually made api-worker's first
+# build look hung rather than merely slow.
+.git/
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+apps/web/.next/
+*.log
+.DS_Store

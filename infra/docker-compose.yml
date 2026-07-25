@@ -1,0 +1,148 @@
+name: opero-ai
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opero
+      POSTGRES_PASSWORD: opero
+      POSTGRES_DB: opero
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opero"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: opero
+      MINIO_ROOT_PASSWORD: opero-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # Local inference runtime (docs/AI_ARCHITECTURE.md §3). The image itself is
+  # lightweight; the model is not bundled — pull it once after first `up`:
+  #   docker compose exec ollama ollama pull qwen2.5:14b-instruct
+  #   docker compose exec ollama ollama pull nomic-embed-text
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  temporal:
+    image: temporalio/auto-setup:1.25
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: opero
+      POSTGRES_PWD: opero
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3010
+    ports:
+      - "8080:8080"
+    depends_on:
+      - temporal
+
+  api:
+    build:
+      # Repo-root context: the image needs both apps/api and services/ai-engine
+      # to preserve the monorepo's relative-path `pip install -e ../../services/ai-engine`.
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../apps/api/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://opero:opero@postgres:5432/opero
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
+      MINIO_ENDPOINT: minio:9000
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3010
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../services/worker
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+
+  # Phase 3's real background jobs (document processing, email classification/
+  # extraction/drafting) need the full apps/api model stack and DB access,
+  # which the Phase 2 `worker` service above (a ping-only skeleton with no DB
+  # dependency) was never built for. Built from the same image as `api`, just
+  # running a Celery worker process instead of uvicorn.
+  api-worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../apps/api/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://opero:opero@postgres:5432/opero
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
+      MINIO_ENDPOINT: minio:9000
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  dashboard:
+    build:
+      context: ../apps/web
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3010:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  minio_data:
+  ollama_data:

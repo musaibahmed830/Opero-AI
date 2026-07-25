@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: opero
+          POSTGRES_PASSWORD: opero
+          POSTGRES_DB: opero
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U opero"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DATABASE_URL: postgresql+asyncpg://opero:opero@localhost:5432/opero
+      REDIS_URL: redis://localhost:6379/0
+      # CI-only values — never reuse these outside a throwaway CI run.
+      SESSION_SIGNING_KEY: ci-only-session-signing-key-not-for-reuse
+      TOKEN_ENCRYPTION_KEY: qk3JzT0m1r7d3F9y8jK1s6bpfW2Nq8Yv3sZ1c9Q7xQe=
+      OAUTH_STATE_SECRET: ci-only-oauth-state-secret-not-for-reuse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pip install ruff
+      - run: ruff check .
+      - run: alembic upgrade head
+      - run: pytest -q
+
+  ai-engine:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ai-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pip install ruff
+      - run: ruff check .
+      - run: pytest -q
+
+  connectors:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/connectors
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pip install ruff
+      - run: ruff check .
+      - run: pytest -q
+
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pip install ruff
+      - run: ruff check .
+      - run: pytest -q
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run build

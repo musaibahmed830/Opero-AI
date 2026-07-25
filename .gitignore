@@ -1,0 +1,22 @@
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/next-env.d.ts
+
+# Env files (never commit real secrets)
+.env
+.env.local
+*.env
+!*.env.example
+
+# OS
+.DS_Store
+
+# Logs
+*.log
