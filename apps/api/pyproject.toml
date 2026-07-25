@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "live_model: exercises the real Ollama model (docs/TESTING_GUIDE.md) — slower and non-deterministic in wording; run `pytest -m \"not live_model\"` for the fast deterministic subset.",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI's dependency-injection pattern requires calling Depends()/Query()/etc.
+# as an argument default — this is the framework's documented idiom, not a bug.
+ignore = ["B008"]
